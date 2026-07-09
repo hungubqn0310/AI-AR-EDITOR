@@ -67,9 +67,8 @@ body.admin {
   color: var(--text);
   text-decoration: none;
 }
-.topnav-brand .dot {
-  width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+.topnav-brand .brand-logo {
+  width: 24px; height: 24px; border-radius: 7px; display: block;
 }
 .topnav-links { display: flex; gap: 4px; flex-wrap: wrap; }
 .topnav-link {
