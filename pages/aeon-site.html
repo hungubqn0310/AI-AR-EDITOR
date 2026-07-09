@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AEON MALL — Banner</title>
+    <style>
+      html, body {
+        margin: 0; height: 100%; background: #fff7f2;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .banner { width: 90%; max-width: 1400px; display: block; }
+    </style>
+  </head>
+  <body>
+    <img class="banner" id="banner" alt="AEON MALL banner" />
+    <script>
+      // Ảnh phục vụ qua domain ngrok — thẻ <img> không gắn được header nên
+      // browser thật sẽ nhận nhầm trang cảnh báo ngrok thay vì ảnh thật; tự
+      // fetch kèm header rồi gán qua blob URL.
+      fetch("../media/images/aeon.png", { headers: { "ngrok-skip-browser-warning": "true" } })
+        .then((res) => res.blob())
+        .then((blob) => { document.getElementById("banner").src = URL.createObjectURL(blob); });
+    </script>
+  </body>
+</html>

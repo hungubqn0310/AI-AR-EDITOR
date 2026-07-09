@@ -1,0 +1,17 @@
+{
+  "name": "ar-qr",
+  "version": "1.0.0",
+  "description": "Quét QR mở trang, camera nhận diện ảnh tĩnh (MindAR) và phủ video/vật thể AI lên trên.",
+  "scripts": {
+    "serve": "python3 -m http.server 8080",
+    "compile-target": "node compile-target.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "puppeteer-core": "^25.3.0",
+    "qrcode": "^1.5.4",
+    "serve-handler": "^6.1.7"
+  }
+}

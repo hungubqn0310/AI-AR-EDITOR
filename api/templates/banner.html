@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Banner nhiều vùng → tạo video AR</title>
+    <link rel="stylesheet" href="/static/admin.css" />
+    <script src="/static/icons.js"></script>
+    <style>
+      /* Riêng cho trang này: canvas vẽ vùng + danh sách vùng đã vẽ. */
+      #canvasWrap { margin-top: 18px; display: none; text-align: center; }
+      #canvasWrap canvas {
+        max-width: 100%; border-radius: var(--radius-sm); cursor: crosshair;
+        box-shadow: 0 0 0 1px var(--border);
+      }
+      #canvasHint { font-size: 12px; color: var(--text-faint); margin-top: 8px; }
+
+      #regionList { margin-top: 16px; }
+      .region-row {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+        background: #f9fafb; border-radius: var(--radius-sm); padding: 8px 10px;
+      }
+      .region-row .badge-num {
+        flex: none; width: 22px; height: 22px; border-radius: 50%;
+        background: var(--ink); color: #fff; font-size: 11px; font-weight: 700;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .region-row input[type="text"] { flex: 1; }
+      #emptyRegions { font-size: 12px; color: var(--text-faint); margin-top: 12px; }
+    </style>
+  </head>
+  <body class="admin" data-api-key="__API_KEY__">
+    <div class="topnav">
+      <div class="topnav-inner">
+        <a class="topnav-brand" href="/upload"><span class="dot"></span>AR QR Studio</a>
+        <nav class="topnav-links">
+          <a class="topnav-link" href="/upload">Upload ảnh</a>
+          <a class="topnav-link" href="/banner">Banner nhiều vùng</a>
+          <a class="topnav-link" href="/history">Lịch sử</a>
+        </nav>
+      </div>
+    </div>
+
+    <div class="page-wrap">
+      <div class="card">
+        <div class="page-head">
+          <div>
+            <h1>Banner nhiều vùng → tạo video AR</h1>
+            <p class="subtitle">
+              Dùng cho ảnh dài/tỷ lệ bất thường (Veo chỉ sinh video 16:9/9:16):
+              vẽ 1 hoặc nhiều vùng cần "động" trên ảnh, phần còn lại giữ nguyên tĩnh.
+            </p>
+          </div>
+        </div>
+
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept="image/*" required />
+          <div class="icon" id="dropzoneIcon">🖼️</div>
+          <div class="main-text" id="dropzoneText">Kéo thả ảnh banner vào đây, hoặc bấm để chọn</div>
+          <div class="sub-text" id="dropzoneSubText">JPG, PNG...</div>
+        </label>
+
+        <div id="canvasWrap">
+          <canvas id="canvas"></canvas>
+          <div id="canvasHint">Kéo chuột trên ảnh để vẽ 1 vùng cần "động" — có thể vẽ nhiều vùng.</div>
+        </div>
+
+        <div id="regionList"></div>
+        <div id="emptyRegions">Chưa có vùng nào — vẽ ít nhất 1 vùng trên ảnh để tiếp tục.</div>
+
+        <button class="btn btn-primary icon-only" id="submitBtn" disabled aria-label="Tạo video AR" title="Tạo video AR">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+        </button>
+
+        <div id="status" class="status-msg"></div>
+
+        <div id="result" class="result-grid">
+          <div class="result-cell">
+            <div class="label">Ảnh gốc</div>
+            <img class="media" id="res-image" />
+          </div>
+          <div class="result-cell">
+            <div class="label">Video AR</div>
+            <video class="media" id="res-video" controls loop muted playsinline></video>
+            <a class="icon-btn" id="res-ar" target="_blank" aria-label="Mở trang AR" title="Mở trang AR">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+            </a>
+          </div>
+          <div class="result-cell">
+            <div class="label">Mã QR</div>
+            <img class="qr" id="res-qr" />
+            <br />
+            <a class="icon-btn solid" id="res-qr-download" aria-label="Tải QR" title="Tải QR">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      document.querySelectorAll(".topnav-link").forEach((a) => {
+        if (a.getAttribute("href") === location.pathname) a.classList.add("active");
+      });
+
+      const apiKey = document.body.dataset.apiKey || "";
+
+      const dropzone = document.getElementById("dropzone");
+      const fileInput = document.getElementById("fileInput");
+      const dropzoneText = document.getElementById("dropzoneText");
+      const dropzoneIcon = document.getElementById("dropzoneIcon");
+      const dropzoneSubText = document.getElementById("dropzoneSubText");
+      const canvasWrap = document.getElementById("canvasWrap");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      const regionListEl = document.getElementById("regionList");
+      const emptyRegionsEl = document.getElementById("emptyRegions");
+      const submitBtn = document.getElementById("submitBtn");
+      const statusEl = document.getElementById("status");
+      const resultEl = document.getElementById("result");
+
+      let img = null; // Image gốc (natural size)
+      let scale = 1; // tỉ lệ canvas hiển thị / ảnh gốc
+      let regions = []; // {x, y, w, h, prompt} theo toạ độ ẢNH GỐC (pixel thật)
+      let dragging = null; // {startX, startY, x, y, w, h} theo toạ độ canvas hiển thị
+
+      function loadImageFile(file) {
+        if (!file) return;
+        dropzoneText.textContent = file.name;
+        dropzoneIcon.style.display = "none";
+        dropzoneSubText.style.display = "none";
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          img = new Image();
+          img.onload = () => {
+            const maxW = 700;
+            scale = Math.min(1, maxW / img.naturalWidth);
+            canvas.width = Math.round(img.naturalWidth * scale);
+            canvas.height = Math.round(img.naturalHeight * scale);
+            regions = [];
+            canvasWrap.style.display = "block";
+            redraw();
+            renderRegionList();
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+
+      fileInput.addEventListener("change", () => loadImageFile(fileInput.files[0]));
+      dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
+      dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+      dropzone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropzone.classList.remove("dragover");
+        if (e.dataTransfer.files[0]) {
+          fileInput.files = e.dataTransfer.files;
+          loadImageFile(e.dataTransfer.files[0]);
+        }
+      });
+
+      function redraw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        ctx.lineWidth = 2;
+        ctx.font = "13px sans-serif";
+        regions.forEach((r, i) => {
+          const cx = r.x * scale, cy = r.y * scale, cw = r.w * scale, ch = r.h * scale;
+          ctx.strokeStyle = "#f97316";
+          ctx.strokeRect(cx, cy, cw, ch);
+          ctx.fillStyle = "#f97316";
+          ctx.fillRect(cx, cy, 20, 18);
+          ctx.fillStyle = "#fff";
+          ctx.fillText(String(i + 1), cx + 6, cy + 13);
+        });
+
+        if (dragging) {
+          ctx.strokeStyle = "#111";
+          ctx.setLineDash([4, 3]);
+          ctx.strokeRect(dragging.x, dragging.y, dragging.w, dragging.h);
+          ctx.setLineDash([]);
+        }
+      }
+
+      function canvasPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const cssScale = canvas.width / rect.width; // canvas có thể bị co lại bởi max-width CSS
+        return {
+          x: (e.clientX - rect.left) * cssScale,
+          y: (e.clientY - rect.top) * cssScale,
+        };
+      }
+
+      canvas.addEventListener("mousedown", (e) => {
+        const p = canvasPos(e);
+        dragging = { startX: p.x, startY: p.y, x: p.x, y: p.y, w: 0, h: 0 };
+      });
+      canvas.addEventListener("mousemove", (e) => {
+        if (!dragging) return;
+        const p = canvasPos(e);
+        dragging.x = Math.min(dragging.startX, p.x);
+        dragging.y = Math.min(dragging.startY, p.y);
+        dragging.w = Math.abs(p.x - dragging.startX);
+        dragging.h = Math.abs(p.y - dragging.startY);
+        redraw();
+      });
+      window.addEventListener("mouseup", () => {
+        if (!dragging) return;
+        if (dragging.w > 8 && dragging.h > 8) {
+          regions.push({
+            x: Math.round(dragging.x / scale),
+            y: Math.round(dragging.y / scale),
+            w: Math.round(dragging.w / scale),
+            h: Math.round(dragging.h / scale),
+            prompt: "",
+          });
+        }
+        dragging = null;
+        redraw();
+        renderRegionList();
+      });
+
+      function renderRegionList() {
+        regionListEl.innerHTML = "";
+        regions.forEach((r, i) => {
+          const row = document.createElement("div");
+          row.className = "region-row";
+          row.innerHTML = `
+            <div class="badge-num">${i + 1}</div>
+            <input type="text" class="field" placeholder="Mô tả hành động cho vùng ${i + 1} (vd: cô gái tiếp tục vẫy tay)..." data-idx="${i}" value="${r.prompt}" />
+            <button type="button" class="icon-btn danger" data-idx="${i}" aria-label="Xoá vùng ${i + 1}" title="Xoá">${ICONS.trash}</button>
+          `;
+          regionListEl.appendChild(row);
+        });
+
+        regionListEl.querySelectorAll("input[type=text]").forEach((input) => {
+          input.addEventListener("input", () => {
+            regions[Number(input.dataset.idx)].prompt = input.value;
+            updateSubmitState();
+          });
+        });
+        regionListEl.querySelectorAll(".icon-btn.danger").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            regions.splice(Number(btn.dataset.idx), 1);
+            redraw();
+            renderRegionList();
+          });
+        });
+
+        emptyRegionsEl.style.display = regions.length === 0 ? "block" : "none";
+        updateSubmitState();
+      }
+
+      function updateSubmitState() {
+        submitBtn.disabled = !(fileInput.files[0] && regions.length > 0 && regions.every((r) => r.prompt.trim()));
+      }
+
+      // Ảnh/video/QR phục vụ qua domain ngrok — thẻ <img>/<video> không gắn
+      // được header nên browser thật sẽ nhận nhầm trang cảnh báo ngrok thay
+      // vì nội dung thật; tự fetch kèm header rồi gán qua blob URL.
+      async function loadBlobSrc(url) {
+        const res = await fetch(url, { headers: { "ngrok-skip-browser-warning": "true" } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return URL.createObjectURL(await res.blob());
+      }
+
+      submitBtn.addEventListener("click", async () => {
+        submitBtn.disabled = true;
+        resultEl.classList.remove("visible");
+        statusEl.classList.remove("error");
+        statusEl.textContent = `Đang xử lý... (sinh video AI cho ${regions.length} vùng, ~1-2 phút/vùng, sau đó ghép + compile AR, xin chờ)`;
+
+        const fd = new FormData();
+        fd.append("image", fileInput.files[0]);
+        fd.append("regions", JSON.stringify(regions));
+
+        try {
+          const res = await fetch("/api/generate-banner", {
+            method: "POST",
+            body: fd,
+            headers: { "ngrok-skip-browser-warning": "true", ...(apiKey ? { "X-API-Key": apiKey } : {}) },
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`HTTP ${res.status}: ${text}`);
+          }
+          const data = await res.json();
+          statusEl.textContent = "Xong! id = " + data.id;
+
+          document.getElementById("res-image").src = await loadBlobSrc(data.image_thumb_url || data.image_url);
+          document.getElementById("res-video").src = await loadBlobSrc(data.video_url);
+          document.getElementById("res-ar").href = data.ar_page_url;
+          const qrBlobUrl = await loadBlobSrc(data.qr_code_url);
+          document.getElementById("res-qr").src = qrBlobUrl;
+
+          const qrDownload = document.getElementById("res-qr-download");
+          qrDownload.href = qrBlobUrl;
+          qrDownload.download = `qr-${data.id}.png`;
+
+          resultEl.classList.add("visible");
+        } catch (err) {
+          statusEl.classList.add("error");
+          statusEl.textContent = "LỖI: " + err.message;
+        } finally {
+          updateSubmitState();
+        }
+      });
+    </script>
+  </body>
+</html>

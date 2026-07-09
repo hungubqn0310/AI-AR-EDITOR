@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>AEON MALL — AR sống động</title>
+    <script>
+      window.__camError = null;
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = function (constraints) {
+          return orig(constraints).catch((err) => {
+            window.__camError = err.name + ": " + err.message;
+            throw err;
+          });
+        };
+      } else {
+        window.__camError = "getUserMedia không tồn tại (context không an toàn?)";
+      }
+    </script>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <style>
+      body { margin: 0; overflow: hidden; }
+      #hint {
+        position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.6); color: #fff; padding: 8px 16px;
+        border-radius: 8px; font-family: sans-serif; font-size: 14px; z-index: 999;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hint">Đang khởi tạo...</div>
+
+    <script>
+      const hint = document.getElementById("hint");
+      const log = (msg) => { console.log("[ar-status]", msg); hint.textContent = msg; };
+
+      // cache-bust: tránh Safari cache lại file .mind/video cũ theo URL.
+      const cacheBust = Date.now();
+      const targetSrc = `../targets/aeon-full-target.mind?v=${cacheBust}`;
+      const videoSrc = `../media/videos/aeon-full.mp4?v=${cacheBust}`;
+
+      // Tự tải target/video (kèm header bypass cảnh báo ngrok) rồi đưa
+      // MindAR/<video> dùng qua blob: URL — tránh việc MindAR/thẻ <video> tự
+      // fetch thẳng URL gốc và nhận nhầm trang cảnh báo ngrok (HTML) thay vì
+      // dữ liệu thật, khiến nó crash âm thầm. Giống hệt kỹ thuật ar-view.html
+      // dùng cho pipeline /api/generate — trang này trước đó fetch thẳng URL
+      // nên vẫn dính đúng lỗi đó.
+      async function loadAsBlobUrl(url, label) {
+        const res = await fetch(url, {
+          headers: { "ngrok-skip-browser-warning": "true" },
+        });
+        if (!res.ok) throw new Error(`${label}: HTTP ${res.status}`);
+        const blob = await res.blob();
+        return URL.createObjectURL(blob);
+      }
+
+      (async () => {
+        try {
+          log("Đang tải target...");
+          const targetBlobUrl = await loadAsBlobUrl(targetSrc, "target");
+
+          log("Đang tải video...");
+          const videoBlobUrl = await loadAsBlobUrl(videoSrc, "video");
+
+          log("Đã tải xong, đang khởi động AR (WebGL)...");
+
+          document.body.insertAdjacentHTML(
+            "beforeend",
+            `
+            <a-scene
+              mindar-image="imageTargetSrc: ${targetBlobUrl}; autoStart: true; uiScanning: yes;"
+              color-space="sRGB"
+              renderer="colorManagement: true, physicallyCorrectLights"
+              vr-mode-ui="enabled: false"
+              device-orientation-permission-ui="enabled: false"
+            >
+              <a-assets>
+                <video id="aeon-video" src="${videoBlobUrl}" preload="auto" loop="true" muted="true" playsinline webkit-playsinline></video>
+              </a-assets>
+              <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+              <a-entity mindar-image-target="targetIndex: 0">
+                <a-video src="#aeon-video" width="1" height="0.2248" position="0 0 0" rotation="0 0 0"></a-video>
+              </a-entity>
+            </a-scene>
+          `
+          );
+
+          const video = document.getElementById("aeon-video");
+          const scene = document.querySelector("a-scene");
+          scene.addEventListener("arReady", () => log("AR sẵn sàng — chĩa camera vào banner AEON"));
+          scene.addEventListener("arError", (e) => {
+            const extra = window.__camError ? ` — Camera: ${window.__camError}` : "";
+            log("LỖI AR: " + JSON.stringify(e.detail) + extra);
+          });
+
+          const target = document.querySelector("[mindar-image-target]");
+          target.addEventListener("targetFound", () => {
+            log("ĐÃ NHẬN DIỆN BANNER ✔ — đang phát video");
+            video.currentTime = 0;
+            video.play();
+          });
+          target.addEventListener("targetLost", () => {
+            log("Mất dấu ảnh, đang quét lại...");
+            video.pause();
+          });
+        } catch (err) {
+          log("LỖI tải dữ liệu: " + (err.stack || err.message || err));
+        }
+      })();
+    </script>
+  </body>
+</html>

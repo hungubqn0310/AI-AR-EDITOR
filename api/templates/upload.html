@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Upload ảnh → tạo video AR</title>
+    <link rel="stylesheet" href="/static/admin.css" />
+  </head>
+  <body class="admin" data-api-key="__API_KEY__">
+    <div class="topnav">
+      <div class="topnav-inner">
+        <a class="topnav-brand" href="/upload"><span class="dot"></span>AR QR Studio</a>
+        <nav class="topnav-links">
+          <a class="topnav-link" href="/upload">Upload ảnh</a>
+          <a class="topnav-link" href="/banner">Banner nhiều vùng</a>
+          <a class="topnav-link" href="/history">Lịch sử</a>
+        </nav>
+      </div>
+    </div>
+
+    <div class="page-wrap">
+      <div class="card narrow">
+        <div class="page-head">
+          <div>
+            <h1>Upload ảnh → tạo video AR</h1>
+            <p class="subtitle">Chọn 1 ảnh, hệ thống tự sinh video AI tiếp diễn hành động + mã QR để xem qua camera.</p>
+          </div>
+        </div>
+
+        <form id="form">
+          <label class="dropzone" id="dropzone">
+            <input type="file" name="image" id="fileInput" accept="image/*" required />
+            <div class="icon" id="dropzoneIcon">🖼️</div>
+            <div class="main-text" id="dropzoneText">Kéo thả ảnh vào đây, hoặc bấm để chọn</div>
+            <div class="sub-text" id="dropzoneSubText">JPG, PNG...</div>
+            <img class="preview-thumb" id="previewThumb" />
+          </label>
+
+          <details class="prompt-details">
+            <summary>Tuỳ chỉnh prompt (không bắt buộc, đã có mặc định)</summary>
+            <textarea class="field" name="prompt">the subject in the image continues its current action naturally, subtle realistic motion, static camera, no photorealistic style change</textarea>
+          </details>
+
+          <button type="submit" class="btn btn-primary icon-only" aria-label="Tạo video AR" title="Tạo video AR">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+          </button>
+        </form>
+
+        <div id="status" class="status-msg"></div>
+
+        <div id="result" class="result-grid">
+          <div class="result-cell">
+            <div class="label">Ảnh gốc</div>
+            <img class="media" id="res-image" />
+          </div>
+          <div class="result-cell">
+            <div class="label">Video AR</div>
+            <video class="media" id="res-video" controls loop muted playsinline></video>
+            <a class="icon-btn" id="res-ar" target="_blank" aria-label="Mở trang AR" title="Mở trang AR">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+            </a>
+          </div>
+          <div class="result-cell">
+            <div class="label">Mã QR</div>
+            <img class="qr" id="res-qr" />
+            <br />
+            <a class="icon-btn solid" id="res-qr-download" aria-label="Tải QR" title="Tải QR">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      document.querySelectorAll(".topnav-link").forEach((a) => {
+        if (a.getAttribute("href") === location.pathname) a.classList.add("active");
+      });
+
+      const form = document.getElementById("form");
+      const statusEl = document.getElementById("status");
+      const resultEl = document.getElementById("result");
+      const submitBtn = form.querySelector("button");
+      const apiKey = document.body.dataset.apiKey || "";
+
+      const dropzone = document.getElementById("dropzone");
+      const fileInput = document.getElementById("fileInput");
+      const dropzoneText = document.getElementById("dropzoneText");
+      const dropzoneIcon = document.getElementById("dropzoneIcon");
+      const dropzoneSubText = document.getElementById("dropzoneSubText");
+      const previewThumb = document.getElementById("previewThumb");
+
+      function showPreview(file) {
+        if (!file) return;
+        dropzoneText.textContent = file.name;
+        dropzoneIcon.style.display = "none";
+        dropzoneSubText.style.display = "none";
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          previewThumb.src = e.target.result;
+          previewThumb.style.display = "block";
+        };
+        reader.readAsDataURL(file);
+      }
+
+      fileInput.addEventListener("change", () => showPreview(fileInput.files[0]));
+      dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
+      dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+      dropzone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropzone.classList.remove("dragover");
+        if (e.dataTransfer.files[0]) {
+          fileInput.files = e.dataTransfer.files;
+          showPreview(e.dataTransfer.files[0]);
+        }
+      });
+
+      // Ảnh/video/QR phục vụ qua domain ngrok — thẻ <img>/<video> không gắn
+      // được header nên browser thật sẽ nhận nhầm trang cảnh báo ngrok thay
+      // vì nội dung thật; tự fetch kèm header rồi gán qua blob URL.
+      async function loadBlobSrc(url) {
+        const res = await fetch(url, { headers: { "ngrok-skip-browser-warning": "true" } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return URL.createObjectURL(await res.blob());
+      }
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        submitBtn.disabled = true;
+        resultEl.classList.remove("visible");
+        statusEl.classList.remove("error");
+        statusEl.textContent = "Đang xử lý... (sinh video AI ~1-2 phút, sau đó compile AR, xin chờ)";
+
+        const fd = new FormData(form);
+        try {
+          const res = await fetch("/api/generate", {
+            method: "POST",
+            body: fd,
+            headers: { "ngrok-skip-browser-warning": "true", ...(apiKey ? { "X-API-Key": apiKey } : {}) },
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`HTTP ${res.status}: ${text}`);
+          }
+          const data = await res.json();
+          statusEl.textContent = "Xong! id = " + data.id;
+
+          document.getElementById("res-image").src = await loadBlobSrc(data.image_thumb_url || data.image_url);
+          document.getElementById("res-video").src = await loadBlobSrc(data.video_url);
+          document.getElementById("res-ar").href = data.ar_page_url;
+          const qrBlobUrl = await loadBlobSrc(data.qr_code_url);
+          document.getElementById("res-qr").src = qrBlobUrl;
+
+          const qrDownload = document.getElementById("res-qr-download");
+          qrDownload.href = qrBlobUrl;
+          qrDownload.download = `qr-${data.id}.png`;
+
+          resultEl.classList.add("visible");
+        } catch (err) {
+          statusEl.classList.add("error");
+          statusEl.textContent = "LỖI: " + err.message;
+        } finally {
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

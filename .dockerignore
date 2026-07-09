@@ -1,0 +1,8 @@
+node_modules
+.venv
+README.md
+.git
+media
+qrcodes
+targets
+.env

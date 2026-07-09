@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Cat AR Demo (MindAR)</title>
+    <script>
+      window.__camError = null;
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = function (constraints) {
+          return orig(constraints).catch((err) => {
+            window.__camError = err.name + ": " + err.message;
+            throw err;
+          });
+        };
+      } else {
+        window.__camError = "getUserMedia không tồn tại (context không an toàn?)";
+      }
+    </script>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <style>
+      body { margin: 0; overflow: hidden; }
+      #hint {
+        position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.6); color: #fff; padding: 8px 16px;
+        border-radius: 8px; font-family: sans-serif; font-size: 14px; z-index: 999;
+        text-align: center;
+      }
+      #debug {
+        position: fixed; top: 8px; left: 8px; right: 8px;
+        background: rgba(0,0,0,0.7); color: #0f0; padding: 6px 10px;
+        border-radius: 6px; font-family: monospace; font-size: 11px; z-index: 999;
+        white-space: pre-wrap; word-break: break-all;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hint">Đang khởi tạo...</div>
+    <div id="debug">debug...</div>
+
+    <a-scene
+      mindar-image="imageTargetSrc: ../targets/cat-targets.mind; autoStart: true; uiScanning: yes;"
+      color-space="sRGB"
+      renderer="colorManagement: true, physicallyCorrectLights"
+      vr-mode-ui="enabled: false"
+      device-orientation-permission-ui="enabled: false"
+    >
+      <a-assets></a-assets>
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <a-entity mindar-image-target="targetIndex: 0">
+        <!-- Vật thể chuyển động khi camera nhận ra đúng ảnh con mèo -->
+        <a-box
+          position="0 0 0.2"
+          scale="0.3 0.3 0.3"
+          color="#ff9800"
+          animation="property: rotation; to: 0 360 0; loop: true; dur: 3000; easing: linear"
+          animation__bounce="property: position; to: 0 0 0.5; dir: alternate; loop: true; dur: 800; easing: easeInOutSine"
+        ></a-box>
+        <a-text
+          value="Meo Meo!"
+          position="0 0.4 0.2"
+          align="center"
+          color="#111"
+          scale="0.6 0.6 0.6"
+        ></a-text>
+      </a-entity>
+    </a-scene>
+
+    <script>
+      const hint = document.getElementById("hint");
+      const log = (msg) => {
+        console.log("[ar-status]", msg);
+        hint.textContent = msg;
+      };
+
+      log("Đang kiểm tra cat-targets.mind...");
+      fetch("../targets/cat-targets.mind")
+        .then((res) => {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.arrayBuffer();
+        })
+        .then((buf) => log(`cat-targets.mind OK (${buf.byteLength} bytes). Chờ camera...`))
+        .catch((err) => log("LỖI tải cat-targets.mind: " + err.message));
+
+      const scene = document.querySelector("a-scene");
+
+      scene.addEventListener("arReady", () => {
+        log("AR sẵn sàng — chĩa camera vào ảnh con mèo (cat-target.jpg)");
+      });
+      scene.addEventListener("arError", (e) => {
+        const extra = window.__camError ? ` — Camera: ${window.__camError}` : "";
+        log("LỖI AR: " + JSON.stringify(e.detail) + extra);
+      });
+
+      const target = document.querySelector("[mindar-image-target]");
+      target.addEventListener("targetFound", () => log("ĐÃ NHẬN DIỆN ẢNH MÈO ✔"));
+      target.addEventListener("targetLost", () => log("Mất dấu ảnh, đang quét lại..."));
+
+      setTimeout(() => {
+        if (hint.textContent.indexOf("Chờ camera") !== -1) {
+          log(
+            hint.textContent +
+              " (Quá 15s vẫn chưa xong — có thể do WebGL/camera bị chặn hoặc chưa cấp quyền)"
+          );
+        }
+      }, 15000);
+
+      const debugEl = document.getElementById("debug");
+      let frameTick = 0;
+      setInterval(() => {
+        frameTick++;
+        const sys = scene.systems && scene.systems["mindar-image-system"];
+        const controller = sys && sys.controller;
+        const states = controller && controller.trackingStates;
+        const videoEl = sys && sys.video;
+        debugEl.textContent = JSON.stringify(
+          {
+            tick: frameTick,
+            hasController: !!controller,
+            videoReadyState: videoEl ? videoEl.readyState : null,
+            videoPaused: videoEl ? videoEl.paused : null,
+            processingVideo: controller ? controller.processingVideo : null,
+            trackingStates: states
+              ? states.map((s) => ({
+                  isTracking: s.isTracking,
+                  trackCount: s.trackCount,
+                  trackMiss: s.trackMiss,
+                  showing: s.showing,
+                }))
+              : null,
+          },
+          null,
+          0
+        );
+      }, 500);
+    </script>
+  </body>
+</html>

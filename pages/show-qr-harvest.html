@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Quét QR để xem video AI</title>
+    <style>
+      html, body {
+        min-height: 100%; margin: 0; display: flex; flex-direction: column;
+        align-items: center; background: #fff;
+        font-family: sans-serif; gap: 16px; padding: 16px 0 32px;
+        overflow-y: auto;
+      }
+      img.qr { width: min(60vw, 260px); height: auto; }
+      p { font-size: 18px; color: #222; text-align: center; margin: 0; }
+    </style>
+  </head>
+  <body>
+    <p>Dùng camera điện thoại quét mã này, chạm vào link hiện ra</p>
+    <img class="qr" src="../qrcodes/qr-harvest.png" alt="QR code" />
+  </body>
+</html>

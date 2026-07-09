@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Lịch sử tạo video AR</title>
+    <link rel="stylesheet" href="/static/admin.css" />
+    <script src="/static/icons.js"></script>
+    <style>
+      /* Riêng cho trang này: danh sách item + media-row ngang. */
+      .wrap { max-width: 880px; margin: 0 auto; padding: 28px 16px 56px; }
+      .item {
+        background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-card);
+        padding: 22px 24px; margin-bottom: 20px;
+      }
+      .item-meta {
+        display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+        font-size: 13px; color: var(--text-muted); padding-bottom: 14px;
+        border-bottom: 1px solid var(--border-soft); margin-bottom: 16px;
+      }
+      .item-meta .time { font-weight: 700; color: var(--text); }
+      .item-meta .prompt { flex: 1; min-width: 200px; color: #4b5563; }
+      .item-meta .edit-link { margin-left: auto; }
+      .error-note { color: var(--danger); font-size: 12px; margin-top: 6px; }
+
+      .media-row { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+      .media-col { text-align: center; }
+      .media-col .label { font-size: 11.5px; color: var(--text-faint); margin-bottom: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+      .media-col img.big, .media-col video.big { max-width: 300px; max-height: 300px; border-radius: var(--radius-sm); display: block; box-shadow: 0 0 0 1px var(--border); }
+      .media-col img.qr { width: 150px; height: 150px; box-shadow: 0 0 0 1px var(--border); border-radius: var(--radius-sm); }
+      .media-col a.link { margin: 8px auto 0; }
+      .media-col.media-loading video.big { display: none; }
+      .media-col:not(.media-loading) .loading-note { display: none; }
+      .loading-note {
+        width: 300px; max-width: 100%; height: 168px; border-radius: var(--radius-sm);
+        background: #f9fafb; box-shadow: 0 0 0 1px var(--border);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 12px; color: var(--text-faint);
+      }
+
+      #empty, #loading { text-align: center; color: var(--text-faint); padding: 60px 0; }
+      #empty { display: none; }
+    </style>
+  </head>
+  <body class="admin" data-api-key="__API_KEY__">
+    <div class="topnav">
+      <div class="topnav-inner">
+        <a class="topnav-brand" href="/upload"><span class="dot"></span>AR QR Studio</a>
+        <nav class="topnav-links">
+          <a class="topnav-link" href="/upload">Upload ảnh</a>
+          <a class="topnav-link" href="/banner">Banner nhiều vùng</a>
+          <a class="topnav-link" href="/history">Lịch sử</a>
+        </nav>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <div class="page-head">
+        <div>
+          <h1>Lịch sử tạo video AR</h1>
+          <p class="subtitle">Tất cả lần upload, mới nhất trước.</p>
+        </div>
+      </div>
+      <div id="loading">Đang tải...</div>
+      <div id="empty">Chưa có lần tạo nào.</div>
+      <div id="list"></div>
+    </div>
+
+    <script>
+      document.querySelectorAll(".topnav-link").forEach((a) => {
+        if (a.getAttribute("href") === location.pathname) a.classList.add("active");
+      });
+
+      const apiKey = document.body.dataset.apiKey || "";
+      const statusLabel = { completed: "Xong", processing: "Đang xử lý", failed: "Lỗi" };
+
+      function esc(s) {
+        const d = document.createElement("div");
+        d.textContent = s || "";
+        return d.innerHTML;
+      }
+
+      async function load() {
+        // ngrok-skip-browser-warning: bắt buộc trên fetch tới API khi phục
+        // vụ qua domain ngrok, nếu không lần fetch đầu phiên sẽ nhận nhầm
+        // trang cảnh báo ngrok thay vì JSON thật.
+        const res = await fetch("/api/generations", {
+          headers: { "ngrok-skip-browser-warning": "true", ...(apiKey ? { "X-API-Key": apiKey } : {}) },
+        });
+        if (!res.ok) {
+          document.getElementById("loading").textContent = "LỖI: HTTP " + res.status;
+          return;
+        }
+        const rows = await res.json();
+        document.getElementById("loading").style.display = "none";
+
+        if (rows.length === 0) {
+          document.getElementById("empty").style.display = "block";
+          return;
+        }
+
+        const list = document.getElementById("list");
+        list.innerHTML = rows
+          .map((r) => {
+            const time = new Date(r.created_at).toLocaleString("vi-VN");
+            const badge = `<span class="badge ${r.status}">${statusLabel[r.status] || r.status}</span>`;
+            const errorNote = r.error_message
+              ? `<div class="error-note" title="${esc(r.error_message)}">${esc(r.error_message).slice(0, 100)}...</div>`
+              : "";
+
+            // data-src (không phải src): ảnh/video phục vụ qua domain ngrok,
+            // thẻ <img>/<video> không gắn được header nên browser thật sẽ
+            // nhận nhầm trang cảnh báo ngrok thay vì nội dung thật — gán
+            // src thật qua loadBlobSrc() (fetch kèm header) sau khi render.
+            const image = r.image_thumb_url
+              ? `<div class="media-col"><div class="label">Ảnh gốc</div><img class="big" data-src="${r.image_thumb_url}" /></div>`
+              : "";
+            const video = r.video_url
+              ? `<div class="media-col media-loading"><div class="label">Video AR</div><div class="loading-note">Đang tải video...</div><video class="big" data-src="${r.video_url}" controls loop muted playsinline></video></div>`
+              : "";
+            const qr = r.qr_code_url
+              ? `<div class="media-col"><div class="label">Mã QR (quét bằng điện thoại)</div><img class="qr" data-src="${r.qr_code_url}" /><a class="icon-btn link" data-download="qr-${r.id}.png" aria-label="Tải QR" title="Tải QR">${ICONS.download}</a></div>`
+              : "";
+
+            return `
+              <div class="item">
+                <div class="item-meta">
+                  <span class="time">${time}</span>
+                  ${badge}
+                  <span class="prompt">${esc(r.prompt)}</span>
+                  ${r.status === "completed" ? `<a class="icon-btn edit-link" href="/edit/${r.id}" aria-label="Sửa điểm" title="Sửa điểm">${ICONS.pencil}</a>` : ""}
+                </div>
+                ${errorNote}
+                <div class="media-row">${image}${video}${qr}</div>
+              </div>
+            `;
+          })
+          .join("");
+
+        loadAllBlobSrcs(list);
+      }
+
+      // Ảnh/video phục vụ qua domain ngrok — thẻ <img>/<video> không gắn
+      // được header nên browser thật sẽ nhận nhầm trang cảnh báo ngrok thay
+      // vì nội dung thật; tự fetch kèm header rồi gán qua blob URL.
+      async function loadBlobSrc(url) {
+        const res = await fetch(url, { headers: { "ngrok-skip-browser-warning": "true" } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return URL.createObjectURL(await res.blob());
+      }
+
+      function loadAllBlobSrcs(container) {
+        container.querySelectorAll("[data-src]").forEach(async (el) => {
+          try {
+            const blobUrl = await loadBlobSrc(el.dataset.src);
+            el.src = blobUrl;
+            const downloadLink = el.parentElement.querySelector("a[data-download]");
+            if (downloadLink) {
+              downloadLink.href = blobUrl;
+              downloadLink.download = downloadLink.dataset.download;
+            }
+            // Video ~3MB, chậm hơn nhiều so với ảnh thumbnail (~55KB) qua
+            // tunnel ngrok — bỏ ô "Đang tải video..." khi đã có dữ liệu để
+            // tránh nhìn như đang bị treo/vỡ.
+            if (el.tagName === "VIDEO") el.parentElement.classList.remove("media-loading");
+          } catch (err) {
+            console.error("load media failed", el.dataset.src, err);
+            if (el.tagName === "VIDEO") {
+              const note = el.parentElement.querySelector(".loading-note");
+              if (note) note.textContent = "Không tải được video.";
+            }
+          }
+        });
+      }
+
+      load();
+    </script>
+  </body>
+</html>

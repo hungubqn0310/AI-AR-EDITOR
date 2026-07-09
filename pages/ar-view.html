@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>AR View</title>
+    <script>
+      window.__camError = null;
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const orig = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = function (constraints) {
+          return orig(constraints).catch((err) => {
+            window.__camError = err.name + ": " + err.message;
+            throw err;
+          });
+        };
+      } else {
+        window.__camError = "getUserMedia không tồn tại (context không an toàn?)";
+      }
+    </script>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+    <style>
+      body { margin: 0; overflow: hidden; }
+      #hint {
+        position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,0.6); color: #fff; padding: 8px 16px;
+        border-radius: 8px; font-family: sans-serif; font-size: 14px; z-index: 999;
+        text-align: center;
+      }
+      #hotspot-popup {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+        display: none; align-items: center; justify-content: center; z-index: 1000;
+        font-family: sans-serif;
+      }
+      #hotspot-popup .box {
+        background: #fff; border-radius: 14px; padding: 20px; max-width: 320px; width: 85%;
+        text-align: left; border-top: 6px solid #6b7280;
+      }
+      #hotspot-popup h3 { margin: 0 0 8px; font-size: 16px; color: #1a1a1a; }
+      #hotspot-popup p { margin: 0; font-size: 14px; color: #374151; white-space: pre-wrap; line-height: 1.5; }
+      #hotspot-popup button {
+        display: block; margin: 16px 0 0 auto; padding: 8px 16px; font-size: 13px; font-weight: 600;
+        background: #111; color: #fff; border: none; border-radius: 8px; cursor: pointer;
+      }
+      /* 4 mẫu popup (khớp TEMPLATES ở /edit) — chỉ đổi màu viền + nhãn nhỏ
+      phía trên tiêu đề, nội dung luôn là title/text người dùng tự nhập. */
+      #hotspot-popup .popup-kicker {
+        display: inline-block; font-size: 11px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px;
+      }
+      #hotspot-popup .box.tpl-simple { border-top-color: #6b7280; }
+      #hotspot-popup .box.tpl-promo { border-top-color: #f97316; }
+      #hotspot-popup .box.tpl-product { border-top-color: #2563eb; }
+      #hotspot-popup .box.tpl-contact { border-top-color: #16a34a; }
+      .tpl-simple .popup-kicker { color: #6b7280; }
+      .tpl-promo .popup-kicker { color: #f97316; }
+      .tpl-product .popup-kicker { color: #2563eb; }
+      .tpl-contact .popup-kicker { color: #16a34a; }
+    </style>
+  </head>
+  <body>
+    <div id="hint">Đang khởi tạo...</div>
+
+    <div id="hotspot-popup">
+      <div class="box">
+        <div id="hotspot-popup-body"></div>
+        <button id="hotspot-popup-close">Đóng</button>
+      </div>
+    </div>
+
+    <script>
+      const hint = document.getElementById("hint");
+      const id = new URLSearchParams(location.search).get("id");
+
+      // Chỉ cập nhật UI (text thân thiện, không thuật ngữ kỹ thuật), không
+      // gửi log lên server — dùng cho các thông báo lặp lại nhiều lần
+      // (tiến độ %, poll trạng thái camera) để tránh spam docker logs.
+      const setHint = (msg) => {
+        hint.textContent = msg;
+      };
+
+      // uiMsg: text thân thiện hiện cho người dùng trên điện thoại.
+      // debugMsg: chi tiết kỹ thuật gửi kèm lên server (docker logs) để
+      // debug — mặc định giống uiMsg nếu không truyền riêng.
+      const log = (uiMsg, debugMsg = uiMsg) => {
+        setHint(uiMsg);
+        console.log("[ar-status]", debugMsg);
+        // Gửi về server để xem qua `docker logs`, khỏi cần debug trực
+        // tiếp trên điện thoại (Safari iOS không có DevTools dễ dùng).
+        fetch("/api/client-log", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+          body: JSON.stringify({ id, message: debugMsg }),
+        }).catch(() => {});
+      };
+
+      window.addEventListener("error", (e) => {
+        log(
+          "Đã có lỗi xảy ra, vui lòng tải lại trang.",
+          "LỖI JS: " + (e.message || e.error) + " @ " + e.filename + ":" + e.lineno
+        );
+      });
+      window.addEventListener("unhandledrejection", (e) => {
+        log(
+          "Đã có lỗi xảy ra, vui lòng tải lại trang.",
+          "LỖI PROMISE: " + (e.reason && (e.reason.stack || e.reason.message || e.reason))
+        );
+      });
+
+      if (!id) {
+        log("Không tìm thấy nội dung AR cho mã QR này.", "LỖI: thiếu tham số ?id=");
+        throw new Error("missing id");
+      }
+
+      // cache-bust: tránh Safari cache lại file .mind/video cũ theo URL.
+      const cacheBust = Date.now();
+      const targetSrc = `../targets/${id}.mind?v=${cacheBust}`;
+      const videoSrc = `../media/videos/${id}.mp4?v=${cacheBust}`;
+
+      // Tự tải target/video (kèm header bypass cảnh báo ngrok) rồi đưa
+      // MindAR/<video> dùng qua blob: URL — tránh việc MindAR tự fetch
+      // thẳng URL gốc và nhận nhầm trang cảnh báo ngrok (HTML) thay vì
+      // dữ liệu thật, khiến nó crash âm thầm (đã gặp thực tế, xem log).
+      async function loadAsBlobUrl(url, label, onProgress) {
+        const res = await fetch(url, {
+          headers: { "ngrok-skip-browser-warning": "true" },
+        });
+        if (!res.ok) throw new Error(`${label}: HTTP ${res.status}`);
+        const total = Number(res.headers.get("content-length")) || 0;
+        if (!res.body || !total) {
+          const blob = await res.blob();
+          return URL.createObjectURL(blob);
+        }
+        const reader = res.body.getReader();
+        const chunks = [];
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (onProgress) onProgress(received, total);
+        }
+        return URL.createObjectURL(new Blob(chunks));
+      }
+
+      // Chấm hotspot bấm vào hiện popup (đặt/sửa ở trang /edit/<id>) — x/y
+      // lưu dạng tỉ lệ 0..1 theo ảnh gốc, cần image_width/height để quy đổi
+      // đúng sang hệ toạ độ target của MindAR (width luôn = 1 unit).
+      async function loadHotspots() {
+        try {
+          const res = await fetch(`/api/generations/${id}/public`, {
+            headers: { "ngrok-skip-browser-warning": "true" },
+          });
+          if (!res.ok) return { hotspots: [], image_width: null, image_height: null };
+          return await res.json();
+        } catch {
+          return { hotspots: [], image_width: null, image_height: null };
+        }
+      }
+
+      function escapeHtml(s) {
+        const d = document.createElement("div");
+        d.textContent = s || "";
+        return d.innerHTML;
+      }
+
+      // 4 mẫu popup khớp với TEMPLATES khai báo ở trang /edit — chỉ đổi
+      // màu viền + nhãn nhỏ phía trên tiêu đề, nội dung luôn là title/text
+      // người dùng tự nhập (plain text), không có field riêng nào khác.
+      const TEMPLATE_KICKERS = {
+        simple: "",
+        promo: "🎉 Khuyến mãi",
+        product: "🛍️ Sản phẩm",
+        contact: "📞 Liên hệ",
+      };
+
+      function showHotspotPopup(h) {
+        const box = document.querySelector("#hotspot-popup .box");
+        const body = document.getElementById("hotspot-popup-body");
+        const tpl = TEMPLATE_KICKERS.hasOwnProperty(h.template) ? h.template : "simple";
+        const kicker = TEMPLATE_KICKERS[tpl];
+
+        box.className = "box tpl-" + tpl;
+        body.innerHTML = `
+          ${kicker ? `<div class="popup-kicker">${kicker}</div>` : ""}
+          <h3>${escapeHtml(h.title)}</h3>
+          <p>${escapeHtml(h.text)}</p>
+        `;
+
+        document.getElementById("hotspot-popup").style.display = "flex";
+      }
+      document.getElementById("hotspot-popup-close").addEventListener("click", () => {
+        document.getElementById("hotspot-popup").style.display = "none";
+      });
+
+      (async () => {
+        try {
+          const hotspotDataPromise = loadHotspots(); // nhẹ, chạy song song không cần chờ riêng
+
+          log("Đang tải nội dung AR...", "Đang tải target...");
+          const targetBlobUrl = await loadAsBlobUrl(targetSrc, "target", (received, total) => {
+            setHint(`Đang tải nội dung AR... ${Math.round((received / total) * 100)}%`);
+          });
+
+          log("Đang tải nội dung AR...", "Đang tải video...");
+          const videoBlobUrl = await loadAsBlobUrl(videoSrc, "video", (received, total) => {
+            setHint(`Đang tải nội dung AR... ${Math.round((received / total) * 100)}%`);
+          });
+
+          const hotspotData = await hotspotDataPromise;
+          const hotspots = hotspotData.hotspots || [];
+
+          log("Đang khởi động camera AR...", "Đã tải xong, đang khởi động AR (WebGL)...");
+
+          // Chấm hotspot: MindAR chuẩn hoá target về width = 1 unit (x từ
+          // -0.5 tới 0.5), height = imageHeight/imageWidth unit — quy đổi
+          // toạ độ tỉ lệ 0..1 (lưu ở /edit) sang hệ này. Không có
+          // image_width/height (ảnh gốc bị xoá...) thì bỏ qua, không vẽ.
+          const imgW = hotspotData.image_width;
+          const imgH = hotspotData.image_height;
+          const hotspotsHtml = (imgW && imgH)
+            ? hotspots.map((h, i) => {
+                const x = (h.x - 0.5).toFixed(4);
+                const y = ((0.5 - h.y) * (imgH / imgW)).toFixed(4);
+                return `
+                  <a-entity class="hotspot clickable" data-idx="${i}"
+                    geometry="primitive: circle; radius: 0.06; segments: 24"
+                    material="color: #f97316; shader: flat; side: double"
+                    position="${x} ${y} 0.01">
+                    <a-text value="${i + 1}" align="center" width="3" color="#fff" position="0 0 0.001"></a-text>
+                  </a-entity>`;
+              }).join("")
+            : "";
+
+          // A-Frame markup xây bằng JS vì src phụ thuộc dữ liệu tải động
+          // (blob URL), không thể viết cứng trong HTML.
+          document.body.insertAdjacentHTML(
+            "beforeend",
+            `
+            <a-scene
+              mindar-image="imageTargetSrc: ${targetBlobUrl}; autoStart: true; uiScanning: yes;"
+              color-space="sRGB"
+              renderer="colorManagement: true, physicallyCorrectLights"
+              vr-mode-ui="enabled: false"
+              device-orientation-permission-ui="enabled: false"
+            >
+              <a-assets>
+                <video id="ar-video" src="${videoBlobUrl}" preload="auto" loop="true" muted="true" playsinline webkit-playsinline></video>
+              </a-assets>
+              <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+              <a-entity mindar-image-target="targetIndex: 0">
+                <a-video src="#ar-video" width="1" height="0.5625" position="0 0 0" rotation="0 0 0"></a-video>
+                ${hotspotsHtml}
+              </a-entity>
+              <a-entity cursor="rayOrigin: mouse" raycaster="objects: .clickable; far: 50"></a-entity>
+            </a-scene>
+          `
+          );
+
+          // Bắt chạm thủ công bằng raycasting của THREE thay vì chỉ dựa vào
+          // <a-entity cursor="rayOrigin: mouse">: MindAR thường preventDefault()
+          // trên sự kiện chạm để chặn cuộn/zoom, khiến trình duyệt không sinh
+          // ra "click" giả lập từ touch — cursor component không nhận được gì.
+          // touchend/click tự bắt ở đây không phụ thuộc việc đó.
+          const hotspotEls = Array.from(document.querySelectorAll(".hotspot"));
+          hotspotEls.forEach((el) => {
+            el.addEventListener("click", () => showHotspotPopup(hotspots[Number(el.dataset.idx)]));
+          });
+
+          if (hotspotEls.length > 0) {
+            const raycaster = new AFRAME.THREE.Raycaster();
+            const mouse = new AFRAME.THREE.Vector2();
+            const topObjects = hotspotEls.map((el) => el.object3D);
+
+            const handleTap = (clientX, clientY) => {
+              const canvas = scene.canvas;
+              if (!canvas) return;
+              const rect = canvas.getBoundingClientRect();
+              mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+              mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+              raycaster.setFromCamera(mouse, scene.camera);
+              const intersects = raycaster.intersectObjects(topObjects, true);
+              if (!intersects.length) return;
+              let obj = intersects[0].object;
+              while (obj && !topObjects.includes(obj)) obj = obj.parent;
+              const idx = obj ? topObjects.indexOf(obj) : -1;
+              if (idx !== -1) showHotspotPopup(hotspots[idx]);
+            };
+
+            document.addEventListener("touchend", (e) => {
+              if (e.changedTouches && e.changedTouches.length) {
+                handleTap(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+              }
+            });
+            document.addEventListener("click", (e) => handleTap(e.clientX, e.clientY));
+          }
+
+          const video = document.getElementById("ar-video");
+          const videoPlane = document.querySelector("a-video");
+          video.addEventListener("loadedmetadata", () => {
+            if (video.videoWidth && video.videoHeight) {
+              videoPlane.setAttribute("height", video.videoHeight / video.videoWidth);
+            }
+          });
+
+          const scene = document.querySelector("a-scene");
+          scene.addEventListener("arReady", () =>
+            log("Đưa camera vào hình ảnh để xem hiệu ứng AR ✨", "AR sẵn sàng — chĩa camera vào ảnh gốc")
+          );
+          scene.addEventListener("arError", (e) => {
+            const extra = window.__camError ? ` — Camera: ${window.__camError}` : "";
+            log(
+              "Không thể khởi động camera AR. Vui lòng kiểm tra quyền truy cập camera và thử lại.",
+              "LỖI AR: " + JSON.stringify(e.detail) + extra
+            );
+          });
+
+          const target = document.querySelector("[mindar-image-target]");
+          target.addEventListener("targetFound", () => {
+            log("Đã nhận diện ảnh ✔ — đang phát video");
+            video.currentTime = 0;
+            video.play();
+          });
+          target.addEventListener("targetLost", () => {
+            log("Mất dấu ảnh, đưa camera lại gần hơn để quét tiếp");
+            video.pause();
+          });
+
+          let arIsReady = false;
+          scene.addEventListener("arReady", () => { arIsReady = true; });
+          target.addEventListener("targetFound", () => { arIsReady = true; });
+
+          const startedAt = Date.now();
+          // Poll mỗi 5s để cập nhật UI, nhưng chỉ gửi log lên server một
+          // lần cho mỗi lần trạng thái camera đổi (không phải mỗi tick)
+          // — tránh spam docker logs khi người dùng chờ cấp quyền lâu.
+          let lastCamState = null;
+          const diagInterval = setInterval(() => {
+            if (arIsReady) { clearInterval(diagInterval); return; }
+            const elapsed = Math.round((Date.now() - startedAt) / 1000);
+            if (elapsed < 10) return;
+
+            const sys = scene.systems && scene.systems["mindar-image-system"];
+            const camVideo = sys && sys.video;
+            const hasCamStream = !!(camVideo && camVideo.srcObject && camVideo.readyState >= 2);
+
+            const uiMsg = !hasCamStream
+              ? "Vui lòng cho phép trình duyệt sử dụng camera để tiếp tục..."
+              : "Đang khởi động AR, vui lòng đợi trong giây lát...";
+            const debugMsg = !hasCamStream
+              ? `Chưa lấy được camera sau ${elapsed}s — có thể đang chờ bạn cấp quyền, hoặc bị trình duyệt/hệ thống chặn.` +
+                (window.__camError ? ` Lỗi: ${window.__camError}` : "")
+              : `Đã có camera (${elapsed}s) — đang khởi động AR (WebGL), có thể mất vài giây lần đầu. Cứ chờ thêm...`;
+
+            if (hasCamStream !== lastCamState) {
+              lastCamState = hasCamStream;
+              log(uiMsg, debugMsg);
+            } else {
+              setHint(uiMsg);
+            }
+          }, 5000);
+        } catch (err) {
+          log(
+            "Không tải được nội dung AR. Vui lòng kiểm tra kết nối mạng và thử lại.",
+            "LỖI tải dữ liệu: " + (err.stack || err.message || err)
+          );
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sửa điểm thông tin (hotspot)</title>
+    <link rel="stylesheet" href="/static/admin.css" />
+    <script src="/static/icons.js"></script>
+    <style>
+      /* Riêng cho trang này: ảnh + chấm marker + danh sách hotspot. */
+      #imgWrap { position: relative; display: inline-block; max-width: 100%; }
+      #img {
+        max-width: 100%; display: block; border-radius: var(--radius-sm);
+        cursor: crosshair; box-shadow: 0 0 0 1px var(--border);
+      }
+      #imgHint { font-size: 12px; color: var(--text-faint); margin-top: 8px; }
+
+      .marker {
+        position: absolute; width: 24px; height: 24px; margin-left: -12px; margin-top: -12px;
+        border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700;
+        display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px #fff;
+        pointer-events: none;
+      }
+
+      #hotspotList { margin-top: 18px; }
+      .hotspot-row {
+        background: #f9fafb; border-radius: var(--radius-md); padding: 12px; margin-bottom: 10px;
+      }
+      .hotspot-row .row-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+      .hotspot-row .badge-num {
+        flex: none; width: 22px; height: 22px; border-radius: 50%;
+        background: var(--ink); color: #fff; font-size: 11px; font-weight: 700;
+        display: flex; align-items: center; justify-content: center;
+      }
+      .hotspot-row input[type="text"] { flex: 1; }
+      .hotspot-row select.field { width: 100%; margin-top: 8px; }
+      .hotspot-row textarea { width: 100%; height: 56px; margin-top: 8px; }
+      #emptyHotspots { font-size: 12px; color: var(--text-faint); margin-top: 12px; }
+
+      /* Xem trước popup thật sự trông ra sao ứng với mẫu đang chọn — khớp
+      style .box/.popup-kicker của ar-view.html để giống hệt lúc xem AR. */
+      .hotspot-preview {
+        margin-top: 10px; background: #fff; border-radius: var(--radius-sm); padding: 12px 14px;
+        border-top: 5px solid #6b7280; box-shadow: 0 0 0 1px var(--border);
+      }
+      .hotspot-preview .kicker {
+        display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.04em; margin-bottom: 6px;
+      }
+      .hotspot-preview h4 { margin: 0 0 4px; font-size: 14px; color: #1a1a1a; }
+      .hotspot-preview p { margin: 0; font-size: 12.5px; color: #374151; white-space: pre-wrap; line-height: 1.4; }
+      .hotspot-preview.tpl-simple { border-top-color: #6b7280; }
+      .hotspot-preview.tpl-promo { border-top-color: #f97316; }
+      .hotspot-preview.tpl-product { border-top-color: #2563eb; }
+      .hotspot-preview.tpl-contact { border-top-color: #16a34a; }
+      .hotspot-preview.tpl-simple .kicker { color: #6b7280; }
+      .hotspot-preview.tpl-promo .kicker { color: #f97316; }
+      .hotspot-preview.tpl-product .kicker { color: #2563eb; }
+      .hotspot-preview.tpl-contact .kicker { color: #16a34a; }
+    </style>
+  </head>
+  <body class="admin" data-api-key="__API_KEY__">
+    <div class="topnav">
+      <div class="topnav-inner">
+        <a class="topnav-brand" href="/upload"><span class="dot"></span>AR QR Studio</a>
+        <nav class="topnav-links">
+          <a class="topnav-link" href="/upload">Upload ảnh</a>
+          <a class="topnav-link" href="/banner">Banner nhiều vùng</a>
+          <a class="topnav-link" href="/history">Lịch sử</a>
+        </nav>
+      </div>
+    </div>
+
+    <div class="page-wrap">
+      <div class="card">
+        <div class="page-head">
+          <div>
+            <h1>Sửa điểm thông tin (hotspot)</h1>
+            <p class="subtitle">Bấm vào ảnh để thêm điểm — mỗi điểm tự đánh số, hiện popup khi bấm lúc xem AR.</p>
+          </div>
+          <a class="side-link" href="/history">← Lịch sử</a>
+        </div>
+
+        <div id="loading" class="status-msg">Đang tải...</div>
+
+        <div id="editArea" style="display:none;">
+          <div id="imgWrap">
+            <img id="img" />
+          </div>
+          <div id="imgHint">Bấm vào ảnh để thêm điểm thông tin mới.</div>
+
+          <div id="hotspotList"></div>
+          <div id="emptyHotspots">Chưa có điểm nào — bấm vào ảnh phía trên để thêm.</div>
+
+          <button class="btn btn-primary icon-only" id="saveBtn" aria-label="Lưu điểm" title="Lưu điểm">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+          </button>
+        </div>
+
+        <div id="status" class="status-msg"></div>
+      </div>
+    </div>
+
+    <script>
+      document.querySelectorAll(".topnav-link").forEach((a) => {
+        if (a.getAttribute("href") === location.pathname) a.classList.add("active");
+      });
+
+      const itemId = "__ITEM_ID__";
+      const apiKey = document.body.dataset.apiKey || "";
+      // ngrok-skip-browser-warning: bắt buộc trên MỌI fetch tới API của
+      // chính mình khi phục vụ qua domain ngrok — thiếu header này thì lần
+      // fetch đầu tiên trong phiên trình duyệt sẽ nhận nhầm trang cảnh báo
+      // ngrok (text/plain) thay vì JSON thật, làm trang treo ở "Đang tải...".
+      const authHeaders = {
+        "ngrok-skip-browser-warning": "true",
+        ...(apiKey ? { "X-API-Key": apiKey } : {}),
+      };
+
+      const loadingEl = document.getElementById("loading");
+      const editAreaEl = document.getElementById("editArea");
+      const imgWrap = document.getElementById("imgWrap");
+      const img = document.getElementById("img");
+      const listEl = document.getElementById("hotspotList");
+      const emptyEl = document.getElementById("emptyHotspots");
+      const saveBtn = document.getElementById("saveBtn");
+      const statusEl = document.getElementById("status");
+
+      let hotspots = []; // {x, y, template, title, text}, x/y là tỉ lệ 0..1 theo ảnh hiển thị
+
+      // 4 mẫu popup — chỉ đổi giao diện (màu/icon/bố cục) khi hiện lúc xem
+      // AR (xem ar-view.html showHotspotPopup()), nội dung luôn là title/text
+      // thuần, không cần nhập thêm gì khác theo từng mẫu.
+      const TEMPLATES = {
+        simple: "Đơn giản",
+        promo: "Khuyến mãi",
+        product: "Sản phẩm",
+        contact: "Liên hệ",
+      };
+      // Nhãn nhỏ hiện phía trên tiêu đề trong popup thật — phải khớp với
+      // TEMPLATE_KICKERS trong ar-view.html để preview đúng như lúc xem AR.
+      const TEMPLATE_KICKERS = {
+        simple: "",
+        promo: "🎉 Khuyến mãi",
+        product: "🛍️ Sản phẩm",
+        contact: "📞 Liên hệ",
+      };
+
+      function escapeHtml(s) {
+        const d = document.createElement("div");
+        d.textContent = s || "";
+        return d.innerHTML;
+      }
+
+      function renderPreview(previewEl, h) {
+        const tpl = TEMPLATES[h.template] ? h.template : "simple";
+        const kicker = TEMPLATE_KICKERS[tpl];
+        previewEl.className = "hotspot-preview tpl-" + tpl;
+        previewEl.innerHTML = `
+          ${kicker ? `<div class="kicker">${kicker}</div>` : ""}
+          <h4>${escapeHtml(h.title) || "(chưa có tiêu đề)"}</h4>
+          <p>${escapeHtml(h.text) || "(chưa có nội dung)"}</p>
+        `;
+      }
+
+      // Ảnh phục vụ qua domain ngrok — thẻ <img> không gắn được header nên
+      // browser thật sẽ nhận nhầm trang cảnh báo ngrok thay vì ảnh; tự fetch
+      // kèm header rồi gán qua blob URL (giống kỹ thuật ar-view.html dùng
+      // cho target/video).
+      async function loadImgSrc(imgEl, url) {
+        const res = await fetch(url, { headers: { "ngrok-skip-browser-warning": "true" } });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        imgEl.src = URL.createObjectURL(await res.blob());
+      }
+
+      async function load() {
+        try {
+          const res = await fetch(`/api/generations/${itemId}`, { headers: authHeaders });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          // Dùng ảnh thumbnail để hiển thị (ảnh gốc điện thoại chụp có thể
+          // tới chục MB, tải rất chậm qua tunnel) — toạ độ hotspot lưu dạng
+          // tỉ lệ 0..1 nên dùng ảnh nhỏ không ảnh hưởng độ chính xác đặt điểm.
+          await loadImgSrc(img, data.image_thumb_url || data.image_url);
+          hotspots = (data.hotspots || []).map((h) => ({ ...h }));
+          loadingEl.style.display = "none";
+          editAreaEl.style.display = "block";
+          renderMarkers();
+          renderList();
+        } catch (err) {
+          loadingEl.textContent = "LỖI: " + err.message;
+        }
+      }
+
+      img.addEventListener("click", (e) => {
+        const rect = img.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / rect.width;
+        const y = (e.clientY - rect.top) / rect.height;
+        hotspots.push({ x, y, template: "simple", title: "", text: "" });
+        renderMarkers();
+        renderList();
+      });
+
+      function renderMarkers() {
+        imgWrap.querySelectorAll(".marker").forEach((el) => el.remove());
+        hotspots.forEach((h, i) => {
+          const marker = document.createElement("div");
+          marker.className = "marker";
+          marker.style.left = `${h.x * 100}%`;
+          marker.style.top = `${h.y * 100}%`;
+          marker.textContent = String(i + 1);
+          imgWrap.appendChild(marker);
+        });
+      }
+
+      function renderList() {
+        listEl.innerHTML = "";
+        hotspots.forEach((h, i) => {
+          const tpl = TEMPLATES[h.template] ? h.template : "simple";
+          const templateOptions = Object.entries(TEMPLATES)
+            .map(([key, label]) => `<option value="${key}" ${key === tpl ? "selected" : ""}>${label}</option>`)
+            .join("");
+
+          const row = document.createElement("div");
+          row.className = "hotspot-row";
+          row.innerHTML = `
+            <div class="row-head">
+              <div class="badge-num">${i + 1}</div>
+              <input type="text" class="field" placeholder="Tiêu đề (vd: Khuyến mãi tháng 7)" data-field="title" data-idx="${i}" value="${h.title || ""}" />
+              <button type="button" class="icon-btn danger" data-idx="${i}" aria-label="Xoá điểm ${i + 1}" title="Xoá">${ICONS.trash}</button>
+            </div>
+            <select class="field" data-field="template" data-idx="${i}">${templateOptions}</select>
+            <textarea class="field" placeholder="Nội dung popup hiện khi bấm vào điểm này..." data-field="text" data-idx="${i}">${h.text || ""}</textarea>
+            <div class="hotspot-preview" data-preview="${i}"></div>
+          `;
+          listEl.appendChild(row);
+          renderPreview(row.querySelector(`[data-preview="${i}"]`), h);
+        });
+
+        listEl.querySelectorAll("input[data-field], textarea[data-field], select[data-field]").forEach((el) => {
+          el.addEventListener("input", () => {
+            const idx = Number(el.dataset.idx);
+            hotspots[idx][el.dataset.field] = el.value;
+            const previewEl = listEl.querySelector(`[data-preview="${idx}"]`);
+            if (previewEl) renderPreview(previewEl, hotspots[idx]);
+          });
+        });
+        listEl.querySelectorAll(".icon-btn.danger").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            hotspots.splice(Number(btn.dataset.idx), 1);
+            renderMarkers();
+            renderList();
+          });
+        });
+
+        emptyEl.style.display = hotspots.length === 0 ? "block" : "none";
+      }
+
+      saveBtn.addEventListener("click", async () => {
+        saveBtn.disabled = true;
+        statusEl.classList.remove("error");
+        statusEl.textContent = "Đang lưu...";
+        try {
+          const res = await fetch(`/api/generations/${itemId}/hotspots`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", ...authHeaders },
+            body: JSON.stringify({ hotspots }),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            throw new Error(`HTTP ${res.status}: ${text}`);
+          }
+          statusEl.textContent = "Đã lưu!";
+        } catch (err) {
+          statusEl.classList.add("error");
+          statusEl.textContent = "LỖI: " + err.message;
+        } finally {
+          saveBtn.disabled = false;
+        }
+      });
+
+      load();
+    </script>
+  </body>
+</html>

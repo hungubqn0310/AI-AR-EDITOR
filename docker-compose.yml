@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ar_qr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ar_qr}
+      POSTGRES_DB: ${POSTGRES_DB:-ar_qr}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ar_qr}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build: .
+    ports:
+      - "5556:5556"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./pages:/app/pages:ro
+      - ./static:/app/static:ro
+      - ./api/templates:/app/api/templates:ro
+      - ./media:/app/media
+      - ./qrcodes:/app/qrcodes
+      - ./targets:/app/targets
+    # Chrome cần /dev/shm đủ lớn, mặc định Docker (64MB) hay làm Chrome crash.
+    shm_size: "1gb"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
